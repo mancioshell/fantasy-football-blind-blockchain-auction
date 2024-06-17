@@ -1,7 +1,7 @@
 import { task } from "hardhat/config";
 import type { TaskArguments } from "hardhat/types";
 
-task("task:deployERC20").setAction(async function (taskArguments: TaskArguments, { ethers }) {
+task("task:deploySealedBidAuction").setAction(async function (taskArguments: TaskArguments, { ethers }) {
   const signers = await ethers.getSigners();
   const erc20Factory = await ethers.getContractFactory("MyERC20");
   const encryptedERC20 = await erc20Factory.connect(signers[0]).deploy();
