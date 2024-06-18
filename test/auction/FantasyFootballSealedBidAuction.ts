@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers, network } from "hardhat";
+import { ethers } from "hardhat";
 
 import { createInstances } from "../instance";
 import { getSigners, initSigners } from "../signers";
@@ -14,12 +14,23 @@ describe("FantasyFootballSealedBidAuction", function () {
   beforeEach(async function () {
     const contract = await deployAuctionFixture();
     this.contractAddress = await contract.getAddress();
-    console.log("contractAddress", this.contractAddress);
     this.auction = contract;
     this.instances = await createInstances(this.contractAddress, ethers, this.signers);
   });
 
   it("should create an auction", async function () {
+    const tx = await this.auction.createAuction();
+    await tx.wait();
+
+    const auctions = await this.auction.getAcutions();
+    const auction = auctions[0];
+    const createdAuction = await this.auction.getAcution(auction.auctionId);
+
+    expect(createdAuction.auctionId).to.equal(auction.auctionId);
+    expect(createdAuction.owner).to.equal(this.signers.alice.address);
+  });
+
+  it("should create an auction with a round", async function () {
     const startDate = new Date();
     const startDateTimestamp = Math.floor(startDate.getTime() / 1000);
 
@@ -27,15 +38,19 @@ describe("FantasyFootballSealedBidAuction", function () {
     currentDate.setSeconds(currentDate.getSeconds() + 20);
     const endDateTimestamp = Math.floor(currentDate.getTime() / 1000);
 
-    const tx = await this.auction.createAuction(startDateTimestamp, endDateTimestamp);
+    let tx = await this.auction.createAuction();
     await tx.wait();
 
     const auctions = await this.auction.getAcutions();
     const auction = auctions[0];
-    const createdAuction = await this.auction.getAcution(auction.auctionId);
 
-    expect(createdAuction.startTime).to.equal(startDateTimestamp);
-    expect(createdAuction.endTime).to.equal(endDateTimestamp);
+    tx = await this.auction.addRound(auction.auctionId, startDateTimestamp, endDateTimestamp);
+    await tx.wait();
+
+    const activeRound = await this.auction.getCurrentRound(auction.auctionId);
+
+    expect(activeRound.startTime).to.equal(startDateTimestamp);
+    expect(activeRound.endTime).to.equal(endDateTimestamp);
   });
 
   it("should place multiple bids and retrives the values", async function () {
@@ -46,15 +61,17 @@ describe("FantasyFootballSealedBidAuction", function () {
     currentDate.setSeconds(currentDate.getSeconds() + 20);
     const endDateTimestamp = Math.floor(currentDate.getTime() / 1000);
 
-    let tx = await this.auction.createAuction(startDateTimestamp, endDateTimestamp);
+    let tx = await this.auction.createAuction();
+    await tx.wait();
+
+    const auctions = await this.auction.getAcutions();
+    const createdAuction = auctions[0];
+
+    tx = await this.auction.addRound(createdAuction.auctionId, startDateTimestamp, endDateTimestamp);
     await tx.wait();
 
     await ethers.provider.send("evm_increaseTime", [2]);
     await ethers.provider.send("evm_mine"); // this will mine a new block with the updated timestamp
-
-    const auctions = await this.auction.getAcutions();
-    const auction = auctions[0];
-    const createdAuction = await this.auction.getAcution(auction.auctionId);
 
     const bobBids = [
       { playerId: 1, bid: 18 },
@@ -69,9 +86,11 @@ describe("FantasyFootballSealedBidAuction", function () {
       await tx.wait();
     }
 
+    const aliceBids = [{ playerId: 1, bid: 5 }];
+
     const auctionWithAlice = this.auction.connect(this.signers.alice);
-    const encryptedAliceBid = this.instances.alice.encrypt64(5);
-    tx = await auctionWithAlice.placeBid(createdAuction.auctionId, bobBids[0].playerId, encryptedAliceBid);
+    const encryptedAliceBid = this.instances.alice.encrypt64(aliceBids[0].bid);
+    tx = await auctionWithAlice.placeBid(createdAuction.auctionId, aliceBids[0].playerId, encryptedAliceBid);
     await tx.wait();
 
     const tokenBob = this.instances.bob.getPublicKey(this.contractAddress);
@@ -98,18 +117,20 @@ describe("FantasyFootballSealedBidAuction", function () {
     const startDateTimestamp = Math.floor(startDate.getTime() / 1000);
 
     const currentDate = new Date();
-    currentDate.setSeconds(currentDate.getSeconds() + 20);
+    currentDate.setSeconds(currentDate.getSeconds() + 50);
     const endDateTimestamp = Math.floor(currentDate.getTime() / 1000);
 
-    let tx = await this.auction.createAuction(startDateTimestamp, endDateTimestamp);
+    let tx = await this.auction.createAuction();
+    await tx.wait();
+
+    const auctions = await this.auction.getAcutions();
+    const createdAuction = auctions[0];
+
+    tx = await this.auction.addRound(createdAuction.auctionId, startDateTimestamp, endDateTimestamp);
     await tx.wait();
 
     await ethers.provider.send("evm_increaseTime", [2]);
     await ethers.provider.send("evm_mine"); // this will mine a new block with the updated timestamp
-
-    const auctions = await this.auction.getAcutions();
-    const auction = auctions[0];
-    const createdAuction = await this.auction.getAcution(auction.auctionId);
 
     let bobBids = [
       { playerId: 1, bid: 18 },
@@ -127,9 +148,11 @@ describe("FantasyFootballSealedBidAuction", function () {
       await tx.wait();
     }
 
+    const aliceBids = [{ playerId: 1, bid: 5 }];
+
     const auctionWithAlice = this.auction.connect(this.signers.alice);
-    const encryptedAliceBid = this.instances.alice.encrypt64(5);
-    tx = await auctionWithAlice.placeBid(createdAuction.auctionId, bobBids[0].playerId, encryptedAliceBid);
+    const encryptedAliceBid = this.instances.alice.encrypt64(aliceBids[0].bid);
+    tx = await auctionWithAlice.placeBid(createdAuction.auctionId, aliceBids[0].playerId, encryptedAliceBid);
     await tx.wait();
 
     const encryptedBobBid = this.instances.bob.encrypt64(updatedBobBid);
@@ -162,18 +185,20 @@ describe("FantasyFootballSealedBidAuction", function () {
     const startDateTimestamp = Math.floor(startDate.getTime() / 1000);
 
     const currentDate = new Date();
-    currentDate.setSeconds(currentDate.getSeconds() + 30);
+    currentDate.setSeconds(currentDate.getSeconds() + 50);
     const endDateTimestamp = Math.floor(currentDate.getTime() / 1000);
 
-    let tx = await this.auction.createAuction(startDateTimestamp, endDateTimestamp);
+    let tx = await this.auction.createAuction();
+    await tx.wait();
+
+    const auctions = await this.auction.getAcutions();
+    const createdAuction = auctions[0];
+
+    tx = await this.auction.addRound(createdAuction.auctionId, startDateTimestamp, endDateTimestamp);
     await tx.wait();
 
     await ethers.provider.send("evm_increaseTime", [2]);
     await ethers.provider.send("evm_mine"); // this will mine a new block with the updated timestamp
-
-    const auctions = await this.auction.getAcutions();
-    const auction = auctions[0];
-    const createdAuction = await this.auction.getAcution(auction.auctionId);
 
     let bobBids = [
       { playerId: 1, bid: 18 },
@@ -188,9 +213,11 @@ describe("FantasyFootballSealedBidAuction", function () {
       await tx.wait();
     }
 
+    const aliceBids = [{ playerId: 1, bid: 5 }];
+
     const auctionWithAlice = this.auction.connect(this.signers.alice);
-    const encryptedAliceBid = this.instances.alice.encrypt64(5);
-    tx = await auctionWithAlice.placeBid(createdAuction.auctionId, bobBids[0].playerId, encryptedAliceBid);
+    const encryptedAliceBid = this.instances.alice.encrypt64(aliceBids[0].bid);
+    tx = await auctionWithAlice.placeBid(createdAuction.auctionId, aliceBids[0].playerId, encryptedAliceBid);
     await tx.wait();
 
     tx = await auctionWithBob.withdrawBid(createdAuction.auctionId, bobBids[0].playerId);
@@ -225,24 +252,44 @@ describe("FantasyFootballSealedBidAuction", function () {
     currentDate.setSeconds(currentDate.getSeconds() + 50);
     const endDateTimestamp = Math.floor(currentDate.getTime() / 1000);
 
-    let tx = await this.auction.createAuction(startDateTimestamp, endDateTimestamp);
+    let tx = await this.auction.createAuction();
+    await tx.wait();
+
+    const auctions = await this.auction.getAcutions();
+    const createdAuction = auctions[0];
+
+    tx = await this.auction.addRound(createdAuction.auctionId, startDateTimestamp, endDateTimestamp);
     await tx.wait();
 
     await ethers.provider.send("evm_increaseTime", [2]);
     await ethers.provider.send("evm_mine"); // this will mine a new block with the updated timestamp
 
-    const auctions = await this.auction.getAcutions();
-    const auction = auctions[0];
-    const createdAuction = await this.auction.getAcution(auction.auctionId);
-
-    let bobBids = [
+    const bobBids = [
       { playerId: 1, bid: 18 },
       { playerId: 2, bid: 29 },
     ];
 
-    let aliceBids = [
+    const aliceBids = [
       { playerId: 1, bid: 2 },
       { playerId: 3, bid: 44 },
+    ];
+
+    const offers = [
+      {
+        playerId: 1,
+        bettors: [
+          { bettorAddress: this.signers.bob.address, bid: bobBids[0].bid },
+          { bettorAddress: this.signers.alice.address, bid: aliceBids[0].bid },
+        ],
+      },
+      {
+        playerId: 2,
+        bettors: [{ bettorAddress: this.signers.bob.address, bid: bobBids[1].bid }],
+      },
+      {
+        playerId: 3,
+        bettors: [{ bettorAddress: this.signers.alice.address, bid: aliceBids[1].bid }],
+      },
     ];
 
     const auctionWithBob = this.auction.connect(this.signers.bob);
@@ -264,12 +311,23 @@ describe("FantasyFootballSealedBidAuction", function () {
     await ethers.provider.send("evm_increaseTime", [50]);
     await ethers.provider.send("evm_mine"); // this will mine a new block with the updated timestamp
 
-    const bids = await auctionWithBob.getBids(createdAuction.auctionId);
+    const bidsRounds = await auctionWithBob.getBids(createdAuction.auctionId);
 
-    expect(bids.length).to.equal(bobBids.length + aliceBids.length);
+    for (const bids of bidsRounds) {
+      expect(bids.length).to.equal(offers.length);
 
-    for (const [index, bid] of bids.entries()) {
-      console.log("bid", bid);
+      for (const offer of bids) {
+        const playerId = parseInt(offer[0]);
+        const bettors = offer[1];
+
+        const expectedBettors = offers.find((offer) => offer.playerId === playerId)?.bettors || [];
+
+        for (const bettor of bettors) {
+          const bettorAddress = bettor[0];
+          const bid = bettor[1];
+          expect(bid).to.equal(expectedBettors.find((b) => b.bettorAddress === bettorAddress)?.bid);
+        }
+      }
     }
   });
 });
